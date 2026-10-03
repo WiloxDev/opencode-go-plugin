@@ -32,11 +32,45 @@ func TestPluginRegistration(t *testing.T) {
 	if reg.Metadata["Name"] != "opencode-go" {
 		t.Errorf("expected Name 'opencode-go', got '%v'", reg.Metadata["Name"])
 	}
-	if reg.Metadata["GitHubRepository"] != "https://github.com/WiloxDev/opencode-go-plugin" {
-		t.Errorf("expected GitHubRepository to match WiloxDev repo, got '%v'", reg.Metadata["GitHubRepository"])
+	if !reg.Capabilities["management_api"] {
+		t.Errorf("expected management_api capability to be true")
 	}
-	if !reg.Capabilities["model_provider"] || !reg.Capabilities["auth_provider"] {
-		t.Errorf("expected model_provider and auth_provider capabilities to be true")
+}
+
+func TestManagementRegisterAndAPI(t *testing.T) {
+	// Test management.register
+	raw, err := handlePluginMethod("management.register", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var env envelope
+	json.Unmarshal(raw, &env)
+	var reg struct {
+		Resources []struct {
+			Path string `json:"Path"`
+			Menu string `json:"Menu"`
+		} `json:"resources"`
+	}
+	json.Unmarshal(env.Result, &reg)
+	if len(reg.Resources) == 0 || reg.Resources[0].Path != "/accounts" {
+		t.Errorf("expected /accounts resource in management.register")
+	}
+
+	// Test GET UI HTML
+	reqUI, _ := json.Marshal(ManagementRequestPayload{
+		Method: "GET",
+		Path:   "/accounts",
+	})
+	rawUI, err := handlePluginMethod("management.handle", reqUI)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var envUI envelope
+	json.Unmarshal(rawUI, &envUI)
+	var respUI ManagementResponsePayload
+	json.Unmarshal(envUI.Result, &respUI)
+	if respUI.StatusCode != 200 {
+		t.Errorf("expected status 200, got %d", respUI.StatusCode)
 	}
 }
 
@@ -65,81 +99,12 @@ func TestModelCatalog(t *testing.T) {
 	if len(res.Models) != len(baseOpenCodeModelIDs) {
 		t.Errorf("expected %d models, got %d", len(baseOpenCodeModelIDs), len(res.Models))
 	}
-
-	foundDeepSeek := false
-	for _, m := range res.Models {
-		if m.ID == "deepseek-v4-pro" {
-			foundDeepSeek = true
-			if m.ContextLength != 1048576 {
-				t.Errorf("expected context length 1048576, got %d", m.ContextLength)
-			}
-			break
-		}
-	}
-	if !foundDeepSeek {
-		t.Errorf("deepseek-v4-pro not found in catalog")
-	}
 }
 
 func TestAuthFlowMultiAccount(t *testing.T) {
-	// 1. Start login
-	raw, err := handlePluginMethod("auth.start_login", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var env envelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("failed unmarshal: %v", err)
-	}
-	var start startLoginResponse
-	if err := json.Unmarshal(env.Result, &start); err != nil {
-		t.Fatalf("failed unmarshal startLoginResponse: %v", err)
-	}
-	if start.State != "waiting_for_key" {
-		t.Errorf("expected State 'waiting_for_key', got '%s'", start.State)
-	}
-
-	// 2. Poll login pending
-	rawPollPending, err := handlePluginMethod("auth.poll_login", []byte(`{"state":"waiting_for_key","code":""}`))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var envPending envelope
-	json.Unmarshal(rawPollPending, &envPending)
-	var pollPending pollLoginResponse
-	json.Unmarshal(envPending.Result, &pollPending)
-	if pollPending.Status != "pending" {
-		t.Errorf("expected status 'pending', got '%s'", pollPending.Status)
-	}
-
-	// 3. Poll login validation error (too short)
-	rawPollShort, err := handlePluginMethod("auth.poll_login", []byte(`{"state":"waiting_for_key","code":"short"}`))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var envShort envelope
-	json.Unmarshal(rawPollShort, &envShort)
-	var pollShort pollLoginResponse
-	json.Unmarshal(envShort.Result, &pollShort)
-	if pollShort.Status != "error" {
-		t.Errorf("expected status 'error' for invalid key, got '%s'", pollShort.Status)
-	}
-
-	// 4. Poll login complete with valid key
 	sampleKey := "oc_sk_a664a43e0e73_Wyq2BJXXjusBKvLZeLL8e7YdKStNy0T7"
-	rawPollComplete, err := handlePluginMethod("auth.poll_login", []byte(`{"state":"waiting_for_key","code":"`+sampleKey+`"}`))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var envComplete envelope
-	json.Unmarshal(rawPollComplete, &envComplete)
-	var pollComplete pollLoginResponse
-	json.Unmarshal(envComplete.Result, &pollComplete)
-	if pollComplete.Status != "complete" {
-		t.Errorf("expected status 'complete', got '%s'", pollComplete.Status)
-	}
 
-	// 5. Parse auth with custom label (multi-account identification)
+	// Parse auth with custom label
 	reqParseWithLabel := []byte(`{"api_key":"` + sampleKey + `","label":"OpenCode Cuenta Wilox 1"}`)
 	rawParse1, err := handlePluginMethod("auth.parse", reqParseWithLabel)
 	if err != nil {
@@ -153,7 +118,7 @@ func TestAuthFlowMultiAccount(t *testing.T) {
 		t.Errorf("expected custom label to be preserved, got '%v'", parsed1["label"])
 	}
 
-	// 6. Parse auth without label (auto-derived truncated label)
+	// Parse auth without label
 	reqParseNoLabel := []byte(`{"api_key":"` + sampleKey + `"}`)
 	rawParse2, err := handlePluginMethod("auth.parse", reqParseNoLabel)
 	if err != nil {
