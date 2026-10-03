@@ -236,9 +236,9 @@ func handlePluginMethod(method string, request []byte) ([]byte, error) {
 			"metadata": map[string]any{
 				"Name":             "opencode-go",
 				"Version":          "1.0.0",
-				"Author":           "Wilox",
-				"Description":      "OpenCode Go provider and model catalog integration",
-				"GitHubRepository": "https://github.com/opencode",
+				"Author":           "Wilox <wilsonlavio9@gmail.com>",
+				"Description":      "OpenCode Go provider, multi-account pool and model catalog integration",
+				"GitHubRepository": "https://github.com/WiloxDev/opencode-go-plugin",
 				"Logo":             "",
 				"ConfigFields":     []any{},
 			},
@@ -269,8 +269,8 @@ func handlePluginMethod(method string, request []byte) ([]byte, error) {
 		resp := startLoginResponse{
 			LoginURL:           "",
 			State:              "waiting_for_key",
-			OAuthCallbackLabel: "Paste your OpenCode Go API key (oc_sk_...)",
-			Instructions:       "1. Go to https://opencode.ai -> Settings -> API Keys\n2. Create or copy your key (starts with oc_sk_)\n3. Paste it in the field below and click Confirm",
+			OAuthCallbackLabel: "Enter OpenCode API Key or Account Key (oc_sk_...):",
+			Instructions:       "1. Obtain your API key from OpenCode (https://opencode.ai) or your WiloxDev License Portal.\n2. Paste your key below to add and bind this account session to CPAMC.\n3. You can add multiple accounts by repeating this process in CPAMC.",
 		}
 		raw, err := json.Marshal(resp)
 		if err != nil {
@@ -288,13 +288,39 @@ func handlePluginMethod(method string, request []byte) ([]byte, error) {
 			raw, _ := json.Marshal(pollLoginResponse{Status: "pending"})
 			return okEnvelope(raw), nil
 		}
+
+		// Basic validation: ensure key has proper format
+		if len(apiKey) < 10 {
+			raw, _ := json.Marshal(pollLoginResponse{
+				Status: "error",
+				Error:  "Invalid key format: key must be a valid OpenCode or subscription key",
+			})
+			return okEnvelope(raw), nil
+		}
+
 		raw, _ := json.Marshal(pollLoginResponse{Status: "complete"})
 		return okEnvelope(raw), nil
 
 	case "auth.parse", "parse_auth":
+		var parsed map[string]any
+		if len(request) > 0 {
+			_ = json.Unmarshal(request, &parsed)
+		}
+
+		// Derive clear account label and id for multi-account management in CPAMC
+		label := "OpenCode Go"
+		if rawLabel, ok := parsed["label"].(string); ok && strings.TrimSpace(rawLabel) != "" {
+			label = strings.TrimSpace(rawLabel)
+		} else if rawKey, ok := parsed["api_key"].(string); ok && len(rawKey) > 16 {
+			// Show truncated key for easy differentiation in multi-account pool
+			label = fmt.Sprintf("OpenCode Go (%s...%s)", rawKey[:8], rawKey[len(rawKey)-4:])
+		}
+
 		res := map[string]any{
 			"provider": "opencode-go",
 			"status":   "active",
+			"label":    label,
+			"prefix":   "ocgo",
 		}
 		raw, _ := json.Marshal(res)
 		return okEnvelope(raw), nil
