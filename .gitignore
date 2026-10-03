@@ -1,0 +1,11 @@
+# Binaries and shared libraries
+*.so
+*.dylib
+*.dll
+
+# Generated headers from cgo / build artifacts
+opencode-go-linux-amd64.h
+
+# Backup files
+*.bak
+*.tmp
